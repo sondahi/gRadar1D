@@ -5,94 +5,117 @@ import com.comert.gEmbedded.api.device.DeviceContext;
 import com.comert.gEmbedded.api.device.Pin;
 import com.comert.gEmbedded.api.device.gpio.*;
 
-class CallBack implements ListenerCallBack{
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+class Radar implements ListenerCallBack {
+
+    private static final Radar INSTANCE = new Radar();
+    private final DigitalOutputPin transmitter;
+    private final ListenerPin receiver;
+    private final int timeoutInMilSec = 1000;
+
+    private Radar() {
+        DeviceContext deviceContext = ApplicationContextFactory.getDeviceContextInstance();
+        GPIOFactory gpioFactory = deviceContext.getGPIOFactoryInstance();
+        this.transmitter = gpioFactory.createDigitalOutputPin(
+                DigitalOutputPinConfigurator
+                        .getBuilder()
+                        .pin(Pin.PIN_20)
+                        .build()
+        );
+        this.receiver = gpioFactory.createListenerPin(
+                ListenerPinConfigurator
+                        .getBuilder()
+                        .pin(Pin.PIN_21)
+                        .eventStatus(Event.SYNCHRONOUS_BOTH)
+                        .timeoutInMilSec(timeoutInMilSec)
+                        .callBack(this)
+                        .build()
+        );
+    }
+
+    public static Radar getInstance() {
+        return INSTANCE;
+    }
+
+    public void start() {
+        receiver.start();
+    }
+
+    public void stop() {
+        receiver.terminate();
+    }
+
     private volatile long time;
+    private volatile boolean completed;
 
     @Override
-    public void onFalling(long timeStamp) {
-
-        synchronized (this){
-            time = timeStamp - time;
-        }
-
+    public synchronized void onRising(long timeStamp) {
+        time = timeStamp;
+        completed = false;
     }
 
     @Override
-    public void onRising(long timeStamp) {
-
-        time = timeStamp;
-
+    public synchronized void onFalling(long timeStamp) {
+        time = timeStamp - time;
+        completed = true;
     }
 
     @Override
     public void onTimeout() {
-        time = 0;
     }
 
     @Override
     public void onError() {
-
+        throw new RuntimeException();
     }
 
-    public long getTime(){
-        long _time = time;
-        time=0;
-        return _time;
+    public int getDistanceInCm() {
+        transmitter.setHigh();
+        try {
+            Thread.sleep(0, 10000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        transmitter.setLow();
+
+        try {
+            Thread.sleep(timeoutInMilSec / 20);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        if (!completed) {
+            return -1;
+        } else {
+            final double distanceInCm = time * 0.00003;
+            final int realDistanceInCm = (int) (distanceInCm / 2);
+            if(realDistanceInCm <2 || realDistanceInCm > 400) {
+                return 0;
+            } else {
+                return realDistanceInCm;
+            }
+        }
 
     }
 
 }
 
 public class App {
-
-    private final static Pin outputPin = Pin.PIN_20;
-    private final static Pin listenerPin = Pin.PIN_21;
-    private final static CallBack callBack = new CallBack();
-
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
 
         DeviceContext deviceContext = ApplicationContextFactory.getDeviceContextInstance();
 
         try {
-
             deviceContext.setupDevice();
+            final Radar radar = Radar.getInstance();
 
-
-
-            GPIOFactory gpioFactory = deviceContext.getGPIOFactoryInstance();
-
-            DigitalOutputPin transmitter = gpioFactory.createDigitalOutputPin(
-                    DigitalOutputPinConfigurator
-                            .getBuilder()
-                            .pin(outputPin)
-                            .build()
-            );
-            ListenerPin receiver = gpioFactory.createListenerPin(
-                    ListenerPinConfigurator
-                            .getBuilder()
-                            .pin(listenerPin)
-                            .eventStatus(Event.SYNCHRONOUS_BOTH)
-                            .timeoutInMilSec(1000)
-                            .callBack(callBack)
-                            .build()
-            );
-
-            receiver.startListener();
-
-            for (int i = 0; i < 50; i++) {
-                transmitter.write();
-                Thread.sleep(0, 10000);
-                transmitter.clear();
-                Thread.sleep(50);
-                receiver.suspendListener();
-                final double timeInNs = callBack.getTime();
-                final double distanceInCm = timeInNs * 0.00003;
-                final double realDistanceInCm = distanceInCm / 2;
-                System.out.println(realDistanceInCm);
-                receiver.resumeListener();
+            radar.start();
+            for (int i = 0; i < 250; i++) {
+                System.out.println(radar.getDistanceInCm());
             }
-
-            receiver.terminateListener();
+            radar.stop();
 
         } catch (Throwable throwable) {
             throwable.printStackTrace();

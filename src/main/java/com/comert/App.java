@@ -5,21 +5,18 @@ import com.comert.gEmbedded.api.device.DeviceContext;
 import com.comert.gEmbedded.api.device.Pin;
 import com.comert.gEmbedded.api.device.gpio.*;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-
 class Radar implements ListenerCallBack {
 
     private static final Radar INSTANCE = new Radar();
-    private final DigitalOutputPin transmitter;
+    private final OutputPin transmitter;
     private final ListenerPin receiver;
     private final int timeoutInMilSec = 1000;
 
     private Radar() {
         DeviceContext deviceContext = ApplicationContextFactory.getDeviceContextInstance();
         GPIOFactory gpioFactory = deviceContext.getGPIOFactoryInstance();
-        this.transmitter = gpioFactory.createDigitalOutputPin(
-                DigitalOutputPinConfigurator
+        this.transmitter = gpioFactory.createOutputPin(
+                OutputPinConfigurator
                         .getBuilder()
                         .pin(Pin.PIN_20)
                         .build()
@@ -91,7 +88,7 @@ class Radar implements ListenerCallBack {
         } else {
             final double distanceInCm = time * 0.00003;
             final int realDistanceInCm = (int) (distanceInCm / 2);
-            if(realDistanceInCm <2 || realDistanceInCm > 400) {
+            if (realDistanceInCm < 2 || realDistanceInCm > 400) {
                 return 0;
             } else {
                 return realDistanceInCm;
